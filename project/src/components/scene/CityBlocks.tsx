@@ -9,9 +9,9 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
-import { SIDEWALK_TOP, blockSpans, createRandom } from './cityLayout';
+import { SIDEWALK_TOP, createRandom, getCityParcels } from './cityLayout';
 
-export type CommerceKind = 'faesa' | 'pharmacy' | 'bakery' | 'workshop' | 'market' | 'cafe' | 'campus';
+export type CommerceKind = 'faesa' | 'pharmacy' | 'bakery' | 'workshop' | 'market' | 'wholesale' | 'cafe' | 'campus';
 
 interface CommerceSpec {
   kind: CommerceKind;
@@ -29,6 +29,7 @@ interface CityBlock {
   park: boolean;
   commerce?: CommerceSpec;
   facingRotation: number;
+  buildingRotation: number;
   inImpactZone: boolean;
 }
 
@@ -86,13 +87,23 @@ const COMMERCE_THEMES: Record<CommerceKind, CommerceTheme> = {
   },
   market: {
     icon: ShoppingBag,
+    wallColor: '#e2e8f0',
+    trimColor: '#ef4444',
+    awningColor: '#dc2626',
+    windowEmissive: '#fca5a5',
+    badgeBg: 'bg-rose-500/20',
+    badgeText: 'text-rose-300',
+    badgeRing: 'ring-rose-400/40',
+  },
+  wholesale: {
+    icon: ShoppingBag,
     wallColor: '#cbd5e1',
-    trimColor: '#0ea5e9',
-    awningColor: '#0284c7',
-    windowEmissive: '#7dd3fc',
-    badgeBg: 'bg-sky-500/20',
-    badgeText: 'text-sky-300',
-    badgeRing: 'ring-sky-400/40',
+    trimColor: '#10b981',
+    awningColor: '#059669',
+    windowEmissive: '#6ee7b7',
+    badgeBg: 'bg-emerald-500/20',
+    badgeText: 'text-emerald-300',
+    badgeRing: 'ring-emerald-400/40',
   },
   cafe: {
     icon: Coffee,
@@ -123,7 +134,7 @@ const COMMERCE_BY_CELL: Record<string, CommerceSpec> = {
   '3,3': { kind: 'workshop', name: 'Autoglass · Av. Vitória', categoryLabel: 'Oficina' },
   '3,4': { kind: 'bakery', name: 'Padaria & Café Universitário', categoryLabel: 'Padaria' },
   '5,3': { kind: 'market', name: 'MiniPreço · Vitória', categoryLabel: 'Mercado' },
-  '5,4': { kind: 'market', name: 'Atacadão São Paulo', categoryLabel: 'Atacado' },
+  '5,4': { kind: 'wholesale', name: 'Atacado São Paulo', categoryLabel: 'Atacado' },
   '2,4': { kind: 'workshop', name: 'Bremenkamp Construção', categoryLabel: 'Comércio' },
   '4,5': { kind: 'workshop', name: 'Centro de Reparação Auto', categoryLabel: 'Oficina' },
   '3,2': { kind: 'pharmacy', name: 'Farmácia Monte Belo', categoryLabel: 'Farmácia' },
@@ -146,78 +157,77 @@ function computeFacingRotation(cx: number, cz: number): number {
 
 function generateCityBlocks(): CityBlock[] {
   const random = createRandom(2026);
-  const spans = blockSpans();
+  const parcels = getCityParcels();
   const blocks: CityBlock[] = [];
 
-  spans.forEach((xs, ix) => {
-    spans.forEach((zs, iz) => {
-      const cellW = xs.max - xs.min;
-      const cellD = zs.max - zs.min;
-      const cx = (xs.min + xs.max) / 2;
-      const cz = (zs.min + zs.max) / 2;
-      const commerce = COMMERCE_BY_CELL[`${ix},${iz}`];
-      const inImpactZone = Math.hypot(cx, cz) <= IMPACT_RADIUS;
-      const facingRotation = computeFacingRotation(cx, cz);
+  for (const parcel of parcels) {
+    const { key, cx, cz, w: cellW, d: cellD, buildingRotation } = parcel;
+    const commerce = COMMERCE_BY_CELL[key];
+    const inImpactZone = Math.hypot(cx, cz) <= IMPACT_RADIUS;
+    const facingRotation = buildingRotation !== 0 ? buildingRotation : computeFacingRotation(cx, cz);
 
-      if (commerce) {
-        random();
-        const theme = COMMERCE_THEMES[commerce.kind];
-        const heightByKind: Record<CommerceKind, number> = {
-          faesa: 7.4,
-          pharmacy: 2.3,
-          bakery: 2.1,
-          workshop: 1.9,
-          market: 2.5,
-          cafe: 2.0,
-          campus: 3.6,
-        };
-        blocks.push({
-          x: cx,
-          z: cz,
-          w: cellW * (commerce.kind === 'faesa' ? 0.92 : 0.84),
-          d: cellD * (commerce.kind === 'faesa' ? 0.92 : 0.84),
-          h: heightByKind[commerce.kind],
-          color: theme.wallColor,
-          park: false,
-          commerce,
-          facingRotation,
-          inImpactZone,
-        });
-        return;
-      }
-
-      if (random() < 0.12) {
-        blocks.push({
-          x: cx,
-          z: cz,
-          w: cellW,
-          d: cellD,
-          h: PARK_HEIGHT,
-          color: PARK_COLOR,
-          park: true,
-          facingRotation,
-          inImpactZone,
-        });
-        return;
-      }
-
-      const w = cellW * (0.7 + random() * 0.2);
-      const d = cellD * (0.7 + random() * 0.2);
-      const h = random() < 0.16 ? 5 + random() * 3.8 : 1.2 + random() * 2.8;
-      const color = PALETTE[Math.floor(random() * PALETTE.length)];
+    if (commerce) {
+      random();
+      const theme = COMMERCE_THEMES[commerce.kind];
+      const heightByKind: Record<CommerceKind, number> = {
+        faesa: 7.4,
+        pharmacy: 2.3,
+        bakery: 2.1,
+        workshop: 1.9,
+        market: 2.5,
+        wholesale: 2.5,
+        cafe: 2.0,
+        campus: 3.6,
+      };
       blocks.push({
-        x: cx + (random() - 0.5) * (cellW - w) * 0.5,
-        z: cz + (random() - 0.5) * (cellD - d) * 0.5,
-        w,
-        d,
-        h,
-        color,
+        x: cx,
+        z: cz,
+        w: Math.min(4.2, cellW * (commerce.kind === 'faesa' ? 0.88 : 0.82)),
+        d: Math.min(4.2, cellD * (commerce.kind === 'faesa' ? 0.88 : 0.82)),
+        h: heightByKind[commerce.kind],
+        color: theme.wallColor,
         park: false,
+        commerce,
         facingRotation,
+        buildingRotation,
         inImpactZone,
       });
+      continue;
+    }
+
+    if (random() < 0.12) {
+      blocks.push({
+        x: cx,
+        z: cz,
+        w: cellW * 0.82,
+        d: cellD * 0.82,
+        h: PARK_HEIGHT,
+        color: PARK_COLOR,
+        park: true,
+        facingRotation,
+        buildingRotation,
+        inImpactZone,
+      });
+      continue;
+    }
+
+    const w = Math.min(4.2, cellW * (0.7 + random() * 0.18));
+    const d = Math.min(4.2, cellD * (0.7 + random() * 0.18));
+    const h = random() < 0.16 ? 5 + random() * 3.8 : 1.2 + random() * 2.8;
+    const color = PALETTE[Math.floor(random() * PALETTE.length)];
+    blocks.push({
+      x: cx,
+      z: cz,
+      w,
+      d,
+      h,
+      color,
+      park: false,
+      facingRotation,
+      buildingRotation,
+      inImpactZone,
     });
-  });
+  }
 
   return blocks;
 }
@@ -228,13 +238,13 @@ const CITY_BLOCKS = generateCityBlocks();
  * Modelo 3D inspirado nas fotos reais do prédio da FAESA na Av. Vitória:
  * - Torre principal bege/off-white de 8 andares com faixas horizontais de janelas escuras
  * - Fachada frontal em pele de vidro verde-azulada voltada para a Av. Vitória
- * - Grande banner vertical azul "FAESA 50 Anos" na lateral próxima à esquina
+ * - Grande banner vertical azul "FAESA 50 Anos" na lateral direita (+X)
  * - Bloco lateral baixo cor terracota/salmão e caixas d'água/casa de máquinas terracota no topo
- * - Passarela aérea FAESA (estrutura laranja e cobertura azul) + estacionamento universitário
+ * - Passarela interna FAESA (estrutura laranja e cobertura azul) + estacionamento universitário
  */
 function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: boolean }) {
   const towerW = 1.95;
-  const towerD = 2.65;
+  const towerD = 2.5;
   const towerH = block.h; // 7.4
   const floorRows = [1.3, 2.1, 2.9, 3.7, 4.5, 5.3, 6.1];
   const mullionCols = [-0.6, -0.3, 0, 0.3, 0.6];
@@ -243,12 +253,12 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
     <group position={[block.x, SIDEWALK_TOP, block.z]}>
       {/* Pátio / Terreno do Campus FAESA */}
       <mesh position={[0, 0.02, 0]} receiveShadow>
-        <boxGeometry args={[block.w + 0.4, 0.04, block.d + 0.4]} />
+        <boxGeometry args={[block.w + 0.35, 0.04, block.d + 0.35]} />
         <meshStandardMaterial color={active ? '#3b1d2e' : '#334155'} roughness={0.9} />
       </mesh>
 
       {/* Torre Principal da FAESA (posicionada próxima à esquina da Av. Vitória) */}
-      <group position={[-0.55, 0, -0.25]}>
+      <group position={[-0.65, 0, -0.25]}>
         {/* Corpo principal em concreto bege claro */}
         <mesh position={[0, towerH / 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[towerW, towerH, towerD]} />
@@ -291,13 +301,13 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
           </group>
         ))}
 
-        {/* Grande Lona / Banner Azul "FAESA Centro Universitário" na lateral esquerda próxima à fachada */}
-        <mesh position={[-towerW / 2 - 0.02, towerH * 0.58, -towerD * 0.24]}>
+        {/* Grande Lona / Banner Azul "FAESA Centro Universitário" na lateral direita (+X) próxima à fachada */}
+        <mesh position={[towerW / 2 + 0.02, towerH * 0.58, -towerD * 0.24]}>
           <boxGeometry args={[0.02, 3.1, 0.92]} />
           <meshStandardMaterial color="#0284c7" emissive="#0369a1" emissiveIntensity={0.55} roughness={0.3} />
         </mesh>
         {/* Detalhe branco simulando o logo/50 anos no banner azul */}
-        <mesh position={[-towerW / 2 - 0.032, towerH * 0.68, -towerD * 0.24]}>
+        <mesh position={[towerW / 2 + 0.032, towerH * 0.68, -towerD * 0.24]}>
           <boxGeometry args={[0.01, 0.55, 0.72]} />
           <meshBasicMaterial color="#f8fafc" />
         </mesh>
@@ -314,7 +324,7 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
 
         {/* Bloco anexo baixo cor Terracota / Salmão encostado na lateral (como na foto da fachada) */}
         <mesh position={[-towerW / 2 - 0.22, 1.35, 0.35]} castShadow receiveShadow>
-          <boxGeometry args={[0.42, 2.7, 1.65]} />
+          <boxGeometry args={[0.42, 2.7, 1.55]} />
           <meshStandardMaterial color="#d97757" roughness={0.75} />
         </mesh>
 
@@ -341,14 +351,12 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
         </mesh>
       </group>
 
-      {/* Passarela Aérea FAESA (treliça laranja e teto azul ligando ao bloco anexo) */}
+      {/* Passarela Interna FAESA (treliça laranja e teto azul ligando ao bloco anexo) */}
       <group position={[0.55, 3.1, 0.1]}>
-        {/* Piso e treliça laranja da passarela */}
         <mesh castShadow>
           <boxGeometry args={[1.35, 0.22, 0.52]} />
           <meshStandardMaterial color="#ea580c" roughness={0.5} />
         </mesh>
-        {/* Cobertura azul curva da passarela */}
         <mesh position={[0, 0.26, 0]} castShadow>
           <boxGeometry args={[1.38, 0.1, 0.58]} />
           <meshStandardMaterial color="#0284c7" roughness={0.4} />
@@ -358,26 +366,26 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
       {/* Bloco Anexo do Campus FAESA (prédio branco à esquerda na foto aérea) */}
       <group position={[1.15, 0, 0.25]}>
         <mesh position={[0, 2.3, 0]} castShadow receiveShadow>
-          <boxGeometry args={[1.15, 4.6, 2.1]} />
+          <boxGeometry args={[1.15, 4.6, 2.0]} />
           <meshStandardMaterial color="#f1f5f9" roughness={0.7} />
         </mesh>
         {[1.2, 2.3, 3.4].map((ay) => (
-          <mesh key={ay} position={[0, ay, -1.06]}>
+          <mesh key={ay} position={[0, ay, -1.01]}>
             <boxGeometry args={[0.92, 0.28, 0.02]} />
             <meshStandardMaterial color="#1e293b" />
           </mesh>
         ))}
         <mesh position={[0, 4.68, 0]}>
-          <boxGeometry args={[1.18, 0.16, 2.14]} />
+          <boxGeometry args={[1.18, 0.16, 2.04]} />
           <meshStandardMaterial color="#0284c7" />
         </mesh>
       </group>
 
       {/* Carros de alunos/professores no estacionamento da FAESA */}
       {[
-        { x: 0.55, z: -1.25, color: '#e2e8f0' },
-        { x: 1.05, z: -1.25, color: '#38bdf8' },
-        { x: 1.5, z: -1.25, color: '#94a3b8' },
+        { x: 0.55, z: -1.1, color: '#e2e8f0' },
+        { x: 1.05, z: -1.1, color: '#38bdf8' },
+        { x: 1.5, z: -1.1, color: '#94a3b8' },
       ].map((car, idx) => (
         <group key={idx} position={[car.x, 0.16, car.z]}>
           <mesh castShadow>
@@ -393,7 +401,7 @@ function FaesaCampusLandmark({ block, active }: { block: CityBlock; active: bool
 
       {/* Marcador Principal em Destaque da FAESA */}
       <Html
-        position={[-0.55, towerH + 2.1, -0.25]}
+        position={[-0.65, towerH + 2.1, -0.25]}
         center
         zIndexRange={[8, 0]}
         wrapperClass="pointer-events-none select-none"
@@ -474,13 +482,13 @@ function WorkshopDetails({ w, d, h }: { w: number; d: number; h: number }) {
         <meshStandardMaterial color="#94a3b8" metalness={0.45} roughness={0.5} />
       </mesh>
       {/* Carro estacionado no pátio de atendimento */}
-      <group position={[0, 0.22, d / 2 + 0.52]} rotation={[0, Math.PI / 2, 0]}>
+      <group position={[0, 0.22, d / 2 + 0.36]} rotation={[0, Math.PI / 2, 0]}>
         <mesh castShadow>
-          <boxGeometry args={[1.15, 0.36, 0.58]} />
+          <boxGeometry args={[1.05, 0.34, 0.52]} />
           <meshStandardMaterial color="#38bdf8" roughness={0.4} />
         </mesh>
-        <mesh position={[0, 0.24, 0]}>
-          <boxGeometry args={[0.58, 0.22, 0.5]} />
+        <mesh position={[0, 0.22, 0]}>
+          <boxGeometry args={[0.52, 0.2, 0.46]} />
           <meshStandardMaterial color="#0f172a" />
         </mesh>
       </group>
@@ -508,7 +516,7 @@ function CommercialBuilding({ block, active }: { block: CityBlock; active: boole
       <group rotation={[0, block.facingRotation, 0]}>
         {/* Piso destacado do lote comercial */}
         <mesh position={[0, 0.015, 0]} receiveShadow>
-          <boxGeometry args={[block.w + 0.35, 0.03, block.d + 0.35]} />
+          <boxGeometry args={[block.w + 0.26, 0.03, block.d + 0.26]} />
           <meshStandardMaterial color={isAffected ? '#4c1d24' : '#475569'} roughness={0.9} />
         </mesh>
 
@@ -525,8 +533,8 @@ function CommercialBuilding({ block, active }: { block: CityBlock; active: boole
         </mesh>
 
         {/* Toldo frontal */}
-        <mesh position={[0, 1.15, block.d / 2 + 0.2]} rotation={[0.25, 0, 0]} castShadow>
-          <boxGeometry args={[block.w * 0.78, 0.1, 0.45]} />
+        <mesh position={[0, 1.15, block.d / 2 + 0.16]} rotation={[0.25, 0, 0]} castShadow>
+          <boxGeometry args={[block.w * 0.78, 0.1, 0.38]} />
           <meshStandardMaterial color={theme.awningColor} roughness={0.6} />
         </mesh>
 
@@ -542,6 +550,9 @@ function CommercialBuilding({ block, active }: { block: CityBlock; active: boole
             />
           </mesh>
         )}
+
+        {/* Janelas dos pavimentos superiores dos prédios comerciais */}
+        <UpperCommercialWindows w={block.w} d={block.d} h={block.h} accent={theme.windowEmissive} />
 
         {/* Detalhes específicos por tipo de comércio */}
         {commerce.kind === 'pharmacy' && <PharmacyRoofSign y={block.h + 0.14} />}
@@ -575,6 +586,125 @@ function CommercialBuilding({ block, active }: { block: CityBlock; active: boole
   );
 }
 
+function UpperCommercialWindows({ w, d, h, accent }: { w: number; d: number; h: number; accent: string }) {
+  const floors: number[] = [];
+  for (let y = 1.62; y <= h - 0.28; y += 0.65) {
+    floors.push(y);
+  }
+  const cols = [-0.28, 0, 0.28];
+
+  return (
+    <group>
+      {floors.map((fy, fIdx) => (
+        <group key={fy}>
+          {cols.map((c, cIdx) => {
+            const lit = (fIdx + cIdx) % 2 === 0;
+            return (
+              <group key={c}>
+                <mesh position={[c * w, fy, 0]}>
+                  <boxGeometry args={[w * 0.16, 0.26, d + 0.022]} />
+                  <meshStandardMaterial
+                    color={lit ? accent : '#1e293b'}
+                    emissive={lit ? accent : '#000000'}
+                    emissiveIntensity={lit ? 0.35 : 0}
+                    roughness={0.25}
+                  />
+                </mesh>
+                <mesh position={[0, fy, c * d]}>
+                  <boxGeometry args={[w + 0.022, 0.26, d * 0.16]} />
+                  <meshStandardMaterial color="#1e293b" roughness={0.25} metalness={0.4} />
+                </mesh>
+              </group>
+            );
+          })}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+function GenericBuilding({ block, seed }: { block: CityBlock; seed: number }) {
+  const floors: number[] = [];
+  for (let y = 0.52; y <= block.h - 0.32; y += 0.68) {
+    floors.push(y);
+  }
+
+  const colCountX = Math.max(2, Math.min(4, Math.floor(block.w / 0.72)));
+  const colCountZ = Math.max(2, Math.min(4, Math.floor(block.d / 0.72)));
+  const spanX = block.w * 0.72;
+  const spanZ = block.d * 0.72;
+  const paneW = (spanX / colCountX) * 0.62;
+  const paneD = (spanZ / colCountZ) * 0.62;
+
+  const colsX = Array.from({ length: colCountX }, (_, i) => -spanX / 2 + ((i + 0.5) / colCountX) * spanX);
+  const colsZ = Array.from({ length: colCountZ }, (_, i) => -spanZ / 2 + ((i + 0.5) / colCountZ) * spanZ);
+
+  return (
+    <group position={[block.x, SIDEWALK_TOP, block.z]} rotation={[0, block.buildingRotation, 0]}>
+      {/* Corpo principal do edifício */}
+      <mesh position={[0, block.h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[block.w, block.h, block.d]} />
+        <meshStandardMaterial color={block.color} flatShading roughness={0.75} metalness={0.05} />
+      </mesh>
+
+      {/* Platibanda / acabamento de cobertura */}
+      <mesh position={[0, block.h + 0.04, 0]} castShadow>
+        <boxGeometry args={[block.w + 0.06, 0.08, block.d + 0.06]} />
+        <meshStandardMaterial color="#334155" roughness={0.7} />
+      </mesh>
+
+      {/* Grade de janelas nas 4 fachadas */}
+      {floors.map((fy, fIdx) => (
+        <group key={fy}>
+          {colsX.map((cx, cIdx) => {
+            const hash = (seed * 37 + fIdx * 19 + cIdx * 13) % 11;
+            const isWarmLit = hash === 0 || hash === 4;
+            const isCoolLit = hash === 2;
+            const color = isWarmLit ? '#fde68a' : isCoolLit ? '#bae6fd' : '#0f172a';
+            const emissive = isWarmLit ? '#f59e0b' : isCoolLit ? '#38bdf8' : '#000000';
+            const emissiveIntensity = isWarmLit ? 0.42 : isCoolLit ? 0.32 : 0;
+
+            return (
+              <mesh key={`x-${cIdx}`} position={[cx, fy, 0]}>
+                <boxGeometry args={[paneW, 0.28, block.d + 0.022]} />
+                <meshStandardMaterial
+                  color={color}
+                  emissive={emissive}
+                  emissiveIntensity={emissiveIntensity}
+                  roughness={0.25}
+                  metalness={0.45}
+                />
+              </mesh>
+            );
+          })}
+
+          {colsZ.map((cz, cIdx) => {
+            const hash = (seed * 29 + fIdx * 23 + cIdx * 17) % 11;
+            const isWarmLit = hash === 1 || hash === 6;
+            const isCoolLit = hash === 3;
+            const color = isWarmLit ? '#fde68a' : isCoolLit ? '#bae6fd' : '#0f172a';
+            const emissive = isWarmLit ? '#f59e0b' : isCoolLit ? '#38bdf8' : '#000000';
+            const emissiveIntensity = isWarmLit ? 0.42 : isCoolLit ? 0.32 : 0;
+
+            return (
+              <mesh key={`z-${cIdx}`} position={[0, fy, cz]}>
+                <boxGeometry args={[block.w + 0.022, 0.28, paneD]} />
+                <meshStandardMaterial
+                  color={color}
+                  emissive={emissive}
+                  emissiveIntensity={emissiveIntensity}
+                  roughness={0.25}
+                  metalness={0.45}
+                />
+              </mesh>
+            );
+          })}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 interface CityBlocksProps {
   active?: boolean;
 }
@@ -589,19 +719,19 @@ export function CityBlocks({ active = false }: CityBlocksProps) {
 
         if (block.park) {
           return (
-            <mesh key={index} position={[block.x, SIDEWALK_TOP + PARK_HEIGHT / 2, block.z]} receiveShadow>
+            <mesh
+              key={index}
+              position={[block.x, SIDEWALK_TOP + PARK_HEIGHT / 2, block.z]}
+              rotation={[0, block.buildingRotation, 0]}
+              receiveShadow
+            >
               <boxGeometry args={[block.w, PARK_HEIGHT, block.d]} />
               <meshStandardMaterial color={block.color} roughness={1} />
             </mesh>
           );
         }
 
-        return (
-          <mesh key={index} position={[block.x, SIDEWALK_TOP + block.h / 2, block.z]} castShadow receiveShadow>
-            <boxGeometry args={[block.w, block.h, block.d]} />
-            <meshStandardMaterial color={block.color} flatShading roughness={0.75} metalness={0.05} />
-          </mesh>
-        );
+        return <GenericBuilding key={index} block={block} seed={index + 1} />;
       })}
     </group>
   );

@@ -46,7 +46,8 @@ export function CityScene({ activeWork, level }: CitySceneProps) {
         maxZoom={60}
         minPolarAngle={Math.PI / 6}
         maxPolarAngle={Math.PI / 2.1}
-        enablePan={false}
+        enablePan
+        screenSpacePanning={false}
       />
     </Canvas>
   );

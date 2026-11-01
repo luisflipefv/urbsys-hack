@@ -9,7 +9,8 @@ import {
   ROAD_TOP,
   SIDEWALK_TOP,
   createRandom,
-  halfWidthOf,
+  horizontalHalfWidthOf,
+  verticalHalfWidthOf,
 } from './cityLayout';
 
 type Axis = 'x' | 'z';
@@ -21,7 +22,7 @@ interface Pedestrian {
   side: Side;
   dir: Side;
   pos: number;
-  lateral: number;
+  jitter: number;
   speed: number;
   phase: number;
   shirtColor: string;
@@ -44,13 +45,26 @@ const PANTS_COLORS = ['#1e293b', '#334155', '#1e3a8a', '#3f3f46', '#0f172a'];
 const SKIN_COLORS = ['#fde68a', '#fed7aa', '#f59e0b', '#d97706', '#92400e'];
 const WALK_BANDS = [-18, -9, 0, 9, 18];
 
-function isCrossingRoad(pos: number): boolean {
+function isCrossingRoad(axis: Axis, pos: number, lateral: number): boolean {
   for (const b of BANDS) {
-    if (Math.abs(pos - b) < halfWidthOf(b)) {
+    const hw =
+      axis === 'x'
+        ? verticalHalfWidthOf(b, lateral < 0)
+        : horizontalHalfWidthOf(b);
+    if (Math.abs(pos - b) < hw) {
       return true;
     }
   }
   return false;
+}
+
+function computeLateral(axis: Axis, band: number, side: Side, pos: number, jitter: number): number {
+  if (axis === 'x') {
+    const hw = horizontalHalfWidthOf(band);
+    return band + side * (hw + 0.42) + jitter;
+  }
+  const hw = verticalHalfWidthOf(band, pos < 0);
+  return band + side * (hw + 0.42) + jitter;
 }
 
 function createPedestrians(): Pedestrian[] {
@@ -61,19 +75,18 @@ function createPedestrians(): Pedestrian[] {
 
   for (const axis of axes) {
     for (const band of WALK_BANDS) {
-      const countPerSide = band === 0 ? 5 : 2;
+      const countPerSide = band === 0 ? 6 : 2;
       for (const side of sides) {
         for (let i = 0; i < countPerSide; i++) {
           const dir: Side = random() < 0.5 ? 1 : -1;
-          const sidewalkCenter = halfWidthOf(band) + 0.42;
-          const jitter = (random() - 0.5) * 0.22;
+          const jitter = (random() - 0.5) * 0.2;
           list.push({
             axis,
             band,
             side,
             dir,
             pos: (random() * 2 - 1) * (LOOP_HALF_LENGTH - 2),
-            lateral: band + side * sidewalkCenter + jitter,
+            jitter,
             speed: 1.05 + random() * 0.55,
             phase: random() * Math.PI * 2,
             shirtColor: SHIRT_COLORS[Math.floor(random() * SHIRT_COLORS.length)],
@@ -93,7 +106,7 @@ interface PedestriansProps {
   level: BlockLevel;
 }
 
-export function Pedestrians({ active, level }: PedestriansProps) {
+export function Pedestrians({ active }: PedestriansProps) {
   const pedestrians = useMemo(createPedestrians, []);
   const groupRefs = useRef<(Group | null)[]>([]);
   const leftLegRefs = useRef<(Mesh | null)[]>([]);
@@ -107,33 +120,42 @@ export function Pedestrians({ active, level }: PedestriansProps) {
       const node = groupRefs.current[index];
       if (!node) return;
 
-      const nearWork = active && ped.band === 0 && Math.abs(ped.pos) < CORE_HALF_LENGTH - 1.2;
-      const blockedSide = level === 'total' || ped.side > 0;
-
-      // Se a calçada estiver interditada pela obra central, o pedestre dá meia-volta na barreira
-      if (nearWork && blockedSide) {
-        const approachingCenter = (ped.pos > 0 && ped.dir < 0) || (ped.pos < 0 && ped.dir > 0);
-        if (approachingCenter) {
+      const nearWork = active && ped.band === 0 && Math.abs(ped.pos) < CORE_HALF_LENGTH * 0.82;
+      if (nearWork && Math.abs(ped.pos) > 5.5) {
+        if ((ped.pos > 0 && ped.dir === -1) || (ped.pos < 0 && ped.dir === 1)) {
           ped.dir = (ped.dir === 1 ? -1 : 1) as Side;
         }
       }
 
-      const speedFactor = nearWork ? 0.65 : 1;
-      ped.pos += ped.dir * ped.speed * speedFactor * dt;
+      const speedMult = nearWork ? 0.65 : 1;
+      ped.pos += ped.dir * ped.speed * speedMult * dt;
 
-      if (ped.pos > LOOP_HALF_LENGTH) ped.pos = -LOOP_HALF_LENGTH;
-      if (ped.pos < -LOOP_HALF_LENGTH) ped.pos = LOOP_HALF_LENGTH;
+      if (ped.pos > LOOP_HALF_LENGTH) ped.pos -= LOOP_HALF_LENGTH * 2;
+      if (ped.pos < -LOOP_HALF_LENGTH) ped.pos += LOOP_HALF_LENGTH * 2;
+
+      const lateral = computeLateral(ped.axis, ped.band, ped.side, ped.pos, ped.jitter);
+      const onRoad = isCrossingRoad(ped.axis, ped.pos, lateral);
+      const baseY = onRoad ? ROAD_TOP : SIDEWALK_TOP;
 
       const strideAngle = t * ped.speed * 7.5 + ped.phase;
       const bounce = Math.abs(Math.sin(strideAngle)) * 0.035;
-      const surfaceY = isCrossingRoad(ped.pos) ? ROAD_TOP : SIDEWALK_TOP;
 
       if (ped.axis === 'x') {
-        node.position.set(ped.pos, surfaceY + bounce, ped.lateral);
+        node.position.set(ped.pos, baseY + bounce, lateral);
         node.rotation.y = ped.dir === 1 ? Math.PI / 2 : -Math.PI / 2;
       } else {
-        node.position.set(ped.lateral, surfaceY + bounce, ped.pos);
-        node.rotation.y = ped.dir === 1 ? 0 : Math.PI;
+        // Quando o pedestre caminha na faixa central (band === 0) ao sul da Av. Vitória (pos > 0), acompanha a calçada diagonal da R. Anselmo Serrate ao lado da FAESA
+        let worldX = lateral;
+        let yaw = ped.dir === 1 ? 0 : Math.PI;
+        if (ped.band === 0 && ped.pos > 0) {
+          const slope = ped.pos <= 18 ? -8.4 / 18 : (-14.5 - -8.4) / 18;
+          const diagOffset = ped.pos <= 18 ? ped.pos * slope : -8.4 + (ped.pos - 18) * slope;
+          worldX += diagOffset;
+          const diagAngle = Math.atan2(slope, 1);
+          yaw = ped.dir === 1 ? diagAngle : diagAngle + Math.PI;
+        }
+        node.position.set(worldX, baseY + bounce, ped.pos);
+        node.rotation.y = yaw;
       }
 
       const legSwing = Math.sin(strideAngle) * 0.5;
@@ -193,4 +215,3 @@ export function Pedestrians({ active, level }: PedestriansProps) {
     </group>
   );
 }
-
